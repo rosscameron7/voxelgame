@@ -3,148 +3,730 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Voxel Builder (Minecraft Style Physics)</title>
+    <title>Voxel Builder</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Rajdhani:wght@400;600;700&display=swap" rel="stylesheet">
     <style>
-        body { margin: 0; overflow: hidden; background-color: #222; user-select: none; }
-        canvas { display: block; }
-
-        /* --- INFO BAR --- */
-        #info {
-            position: absolute;
-            top: 10px;
-            width: 100%;
-            text-align: center;
-            color: white;
-            font-family: Arial, sans-serif;
-            z-index: 100;
-            text-shadow: 1px 1px 2px black;
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
         }
 
-        /* --- CROSSHAIR & BLOCK INDICATOR --- */
-        #crosshair {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            width: 10px;
-            height: 10px;
-            margin-top: -5px; 
-            margin-left: -5px; 
-            border: 2px solid white;
-            border-radius: 50%; 
-            box-shadow: 0 0 5px rgba(0, 0, 0, 0.5);
-            pointer-events: none; 
-            z-index: 1000;
+        body { 
+            margin: 0; 
+            overflow: hidden; 
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            user-select: none;
+            font-family: 'Rajdhani', sans-serif;
         }
         
-        #block-indicator {
-            position: absolute;
-            bottom: 20px;
-            left: 50%;
-            transform: translateX(-50%);
-            padding: 8px 15px;
-            background-color: rgba(0, 0, 0, 0.7);
-            color: white;
-            font-family: Arial, sans-serif;
-            border-radius: 5px;
-            z-index: 1000;
-            min-width: 150px;
-            text-align: center;
+        canvas { display: block; }
+
+        /* --- ANIMATED GRADIENT BACKGROUND --- */
+        @keyframes gradientShift {
+            0% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+            100% { background-position: 0% 50%; }
         }
 
-        /* --- PAUSE MENU --- */
-        #pause-menu {
-            display: none; 
+        /* --- GAME HUD --- */
+        #hud-container {
             position: absolute;
             top: 0;
             left: 0;
             width: 100%;
             height: 100%;
-            background-color: rgba(0, 0, 0, 0.85);
-            z-index: 2000;
-            color: white;
-            font-family: Arial, sans-serif;
-            text-align: center;
-            padding-top: 10vh; 
+            pointer-events: none;
+            z-index: 100;
         }
-        
-        #pause-menu button {
-            background-color: #4CAF50;
-            color: white;
-            padding: 10px 20px;
-            margin: 10px;
-            border: none;
+
+        #break-progress {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, 30px);
+    width: 120px;
+    height: 8px;
+    background: rgba(255,255,255,0.1);
+    border: 1px solid #00ff88;
+    display: none;
+    z-index: 1000;
+}
+
+#break-progress-fill {
+    height: 100%;
+    width: 0%;
+    background: #00ff88;
+    transition: width 0.05s linear;
+}
+
+
+        /* Top Bar */
+        #top-bar {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            padding: 20px 30px;
+            background: linear-gradient(180deg, rgba(0,0,0,0.8) 0%, rgba(0,0,0,0) 100%);
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+        }
+
+        #game-title {
+            font-family: 'Press Start 2P', cursive;
+            font-size: 24px;
+            color: #00ff88;
+            text-shadow: 0 0 20px rgba(0,255,136,0.5), 2px 2px 0 #000;
+            letter-spacing: 2px;
+            animation: titleGlow 2s ease-in-out infinite;
+        }
+
+        @keyframes titleGlow {
+            0%, 100% { text-shadow: 0 0 20px rgba(0,255,136,0.5), 2px 2px 0 #000; }
+            50% { text-shadow: 0 0 30px rgba(0,255,136,0.8), 2px 2px 0 #000; }
+        }
+
+        #stats-panel {
+            background: rgba(0,0,0,0.7);
+            border: 2px solid #00ff88;
+            border-radius: 8px;
+            padding: 15px 20px;
+            font-family: 'Rajdhani', sans-serif;
+            font-weight: 600;
+            color: #fff;
+            min-width: 180px;
+            backdrop-filter: blur(10px);
+        }
+
+        .stat-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 8px;
+            font-size: 16px;
+        }
+
+        .stat-row:last-child {
+            margin-bottom: 0;
+        }
+
+        .stat-label {
+            color: #00ff88;
+            margin-right: 15px;
+        }
+
+        .stat-value {
+            color: #fff;
+            font-weight: 700;
+        }
+
+        /* Crosshair */
+        #crosshair {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 4px;
+            height: 4px;
+            margin-top: -2px;
+            margin-left: -2px;
+            pointer-events: none;
+        }
+
+        #crosshair::before,
+        #crosshair::after {
+            content: '';
+            position: absolute;
+            background: #00ff88;
+            box-shadow: 0 0 10px rgba(0,255,136,0.8);
+        }
+
+        #crosshair::before {
+            width: 20px;
+            height: 2px;
+            left: 50%;
+            top: 50%;
+            transform: translate(-50%, -50%);
+        }
+
+        #crosshair::after {
+            width: 2px;
+            height: 20px;
+            left: 50%;
+            top: 50%;
+            transform: translate(-50%, -50%);
+        }
+
+        /* Block Hotbar */
+        #hotbar {
+            position: absolute;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 10px;
+            padding: 15px;
+            background: rgba(0,0,0,0.8);
+            border: 3px solid #00ff88;
+            border-radius: 12px;
+            backdrop-filter: blur(10px);
+            box-shadow: 0 5px 30px rgba(0,255,136,0.3);
+        }
+
+        .hotbar-slot {
+            width: 70px;
+            height: 70px;
+            background: rgba(255,255,255,0.05);
+            border: 2px solid #333;
+            border-radius: 8px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
             cursor: pointer;
-            font-size: 1.1em;
-            border-radius: 5px;
+            transition: all 0.2s ease;
+            position: relative;
         }
 
-        #pause-menu h1 { margin-bottom: 20px; }
+        .hotbar-slot:hover {
+            background: rgba(255,255,255,0.1);
+            border-color: #00ff88;
+            transform: translateY(-3px);
+        }
 
-        .setting-group { margin: 20px auto; width: 350px; text-align: left; }
-        .setting-group label { display: block; margin-bottom: 5px; font-size: 1.1em; }
-        .setting-group input[type="range"] { width: 100%; margin-top: 5px; }
-        .setting-group span { display: inline-block; width: 40px; text-align: right; margin-left: 10px; }
+        .hotbar-slot.active {
+            background: rgba(0,255,136,0.2);
+            border: 3px solid #00ff88;
+            box-shadow: 0 0 20px rgba(0,255,136,0.5), inset 0 0 20px rgba(0,255,136,0.2);
+        }
+
+        .slot-number {
+            position: absolute;
+            top: 4px;
+            left: 6px;
+            font-family: 'Press Start 2P', cursive;
+            font-size: 10px;
+            color: #00ff88;
+        }
+
+        .slot-name {
+            font-family: 'Rajdhani', sans-serif;
+            font-size: 13px;
+            font-weight: 700;
+            color: #fff;
+            text-align: center;
+            margin-top: 5px;
+        }
+
+        .slot-icon {
+            width: 40px;
+            height: 40px;
+            background-size: cover;
+            image-rendering: pixelated;
+        }
+
+        /* Controls Guide */
+        #controls-guide {
+            position: absolute;
+            bottom: 30px;
+            left: 30px;
+            background: rgba(0,0,0,0.7);
+            border: 2px solid #00ff88;
+            border-radius: 8px;
+            padding: 15px 20px;
+            backdrop-filter: blur(10px);
+            font-family: 'Rajdhani', sans-serif;
+        }
+
+        .control-section {
+            margin-bottom: 12px;
+        }
+
+        .control-section:last-child {
+            margin-bottom: 0;
+        }
+
+        .control-title {
+            font-size: 12px;
+            color: #00ff88;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 6px;
+            font-weight: 700;
+        }
+
+        .control-item {
+            display: flex;
+            align-items: center;
+            margin-bottom: 4px;
+            font-size: 14px;
+        }
+
+        .control-key {
+            display: inline-block;
+            background: rgba(0,255,136,0.2);
+            border: 1px solid #00ff88;
+            border-radius: 4px;
+            padding: 2px 8px;
+            margin-right: 8px;
+            font-family: 'Press Start 2P', cursive;
+            font-size: 10px;
+            color: #00ff88;
+            min-width: 30px;
+            text-align: center;
+        }
+
+        .control-action {
+            color: #fff;
+            font-weight: 600;
+        }
+
+        /* Pause Menu */
+        #pause-menu {
+            display: none;
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(135deg, rgba(0,0,0,0.95) 0%, rgba(22,33,62,0.95) 100%);
+            z-index: 2000;
+            backdrop-filter: blur(15px);
+        }
+
+        .menu-container {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            width: 90%;
+            max-width: 600px;
+        }
+
+        .menu-title {
+            font-family: 'Press Start 2P', cursive;
+            font-size: 48px;
+            color: #00ff88;
+            text-shadow: 0 0 30px rgba(0,255,136,0.8), 4px 4px 0 #000;
+            margin-bottom: 40px;
+            letter-spacing: 3px;
+            animation: titlePulse 1.5s ease-in-out infinite;
+        }
+
+        @keyframes titlePulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+        }
+
+        .menu-buttons {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            margin-bottom: 30px;
+        }
+
+        .menu-btn {
+            background: linear-gradient(135deg, rgba(0,255,136,0.1) 0%, rgba(0,255,136,0.05) 100%);
+            border: 3px solid #00ff88;
+            color: #fff;
+            padding: 18px 40px;
+            font-family: 'Rajdhani', sans-serif;
+            font-size: 22px;
+            font-weight: 700;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .menu-btn::before {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 0;
+            height: 0;
+            background: rgba(0,255,136,0.3);
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            transition: width 0.5s ease, height 0.5s ease;
+        }
+
+        .menu-btn:hover::before {
+            width: 400px;
+            height: 400px;
+        }
+
+        .menu-btn:hover {
+            background: rgba(0,255,136,0.2);
+            box-shadow: 0 0 30px rgba(0,255,136,0.5);
+            transform: translateY(-2px);
+        }
+
+        .menu-btn span {
+            position: relative;
+            z-index: 1;
+        }
+
+        /* Settings Panel */
+        #settings-panel {
+            display: none;
+            margin-top: 30px;
+            background: rgba(0,0,0,0.5);
+            border: 2px solid #00ff88;
+            border-radius: 8px;
+            padding: 30px;
+            text-align: left;
+        }
+
+        .settings-title {
+            font-family: 'Press Start 2P', cursive;
+            font-size: 20px;
+            color: #00ff88;
+            margin-bottom: 25px;
+            text-align: center;
+        }
+
+        .setting-group {
+            margin-bottom: 25px;
+        }
+
+        .setting-group label {
+            display: block;
+            font-family: 'Rajdhani', sans-serif;
+            font-size: 18px;
+            font-weight: 700;
+            color: #00ff88;
+            margin-bottom: 10px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .slider-container {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        input[type="range"] {
+            flex: 1;
+            height: 8px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 4px;
+            outline: none;
+            -webkit-appearance: none;
+        }
+
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 20px;
+            height: 20px;
+            background: #00ff88;
+            border-radius: 50%;
+            cursor: pointer;
+            box-shadow: 0 0 10px rgba(0,255,136,0.5);
+            transition: all 0.2s ease;
+        }
+
+        input[type="range"]::-webkit-slider-thumb:hover {
+            transform: scale(1.2);
+            box-shadow: 0 0 20px rgba(0,255,136,0.8);
+        }
+
+        input[type="range"]::-moz-range-thumb {
+            width: 20px;
+            height: 20px;
+            background: #00ff88;
+            border: none;
+            border-radius: 50%;
+            cursor: pointer;
+            box-shadow: 0 0 10px rgba(0,255,136,0.5);
+        }
+
+        .slider-value {
+            font-family: 'Rajdhani', sans-serif;
+            font-size: 20px;
+            font-weight: 700;
+            color: #fff;
+            min-width: 60px;
+            text-align: right;
+        }
+
+        /* Click to Start Overlay */
+        #start-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(135deg, rgba(0,0,0,0.95) 0%, rgba(22,33,62,0.95) 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 3000;
+            cursor: pointer;
+            transition: opacity 0.5s ease;
+        }
+
+        #start-overlay.hidden {
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        .start-content {
+            text-align: center;
+        }
+
+        .start-title {
+            font-family: 'Press Start 2P', cursive;
+            font-size: 52px;
+            color: #00ff88;
+            text-shadow: 0 0 40px rgba(0,255,136,0.8), 4px 4px 0 #000;
+            margin-bottom: 30px;
+            animation: startPulse 2s ease-in-out infinite;
+        }
+
+        @keyframes startPulse {
+            0%, 100% { transform: scale(1); text-shadow: 0 0 40px rgba(0,255,136,0.8), 4px 4px 0 #000; }
+            50% { transform: scale(1.08); text-shadow: 0 0 60px rgba(0,255,136,1), 4px 4px 0 #000; }
+        }
+
+        .start-instruction {
+            font-family: 'Rajdhani', sans-serif;
+            font-size: 24px;
+            font-weight: 700;
+            color: #fff;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            animation: blink 1.5s ease-in-out infinite;
+        }
+
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.3; }
+        }
+
+        /* Notification System */
+        #notification {
+            position: absolute;
+            top: 100px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0,0,0,0.9);
+            border: 2px solid #00ff88;
+            border-radius: 8px;
+            padding: 15px 30px;
+            font-family: 'Rajdhani', sans-serif;
+            font-size: 18px;
+            font-weight: 700;
+            color: #00ff88;
+            display: none;
+            animation: slideDown 0.3s ease;
+            z-index: 1500;
+            box-shadow: 0 5px 25px rgba(0,255,136,0.4);
+        }
+
+        @keyframes slideDown {
+            from { transform: translate(-50%, -30px); opacity: 0; }
+            to { transform: translate(-50%, 0); opacity: 1; }
+        }
+
+        /* Responsive adjustments */
+        @media (max-width: 768px) {
+            #game-title {
+                font-size: 16px;
+            }
+
+            .menu-title {
+                font-size: 32px;
+            }
+
+            .start-title {
+                font-size: 36px;
+            }
+
+            .hotbar-slot {
+                width: 60px;
+                height: 60px;
+            }
+
+            #controls-guide {
+                font-size: 12px;
+            }
+        }
     </style>
     
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://unpkg.com/three@0.128.0/examples/js/controls/PointerLockControls.js"></script>
 </head>
 <body>
-    <div id="info">
-        Voxel Builder | W/A/S/D to move | **SPACEBAR to Jump** | **1/2/3 to Switch Block** | Click to **Place** | Shift + Click to **Remove** | **P to Pause**
+    <!-- Start Overlay -->
+    <div id="start-overlay">
+        <div class="start-content">
+            <div class="start-title">VOXEL BUILDER</div>
+            <div class="start-instruction">Click to Start</div>
+        </div>
     </div>
-    
-    <div id="crosshair"></div>
-    <div id="block-indicator">Block Type: Grass (1)</div>
 
-    <div id="pause-menu">
-        <h1>PAUSED</h1>
-        
-        <button id="resume-button">RESUME (P)</button>
-        <button id="settings-button">SETTINGS</button>
-
-        <div id="settings-panel" style="display:none; margin-top: 30px;">
-            <h2>Gameplay Settings</h2>
-            
-            <div class="setting-group">
-                <label for="sensitivity-slider">Movement Sensitivity:</label>
-                <input type="range" id="sensitivity-slider" min="0.1" max="2.0" step="0.05" value="1.0">
-                <span id="sensitivity-value">1.00</span>
+    <!-- HUD Container -->
+    <div id="hud-container">
+        <!-- Top Bar -->
+        <div id="top-bar">
+            <div id="game-title">VOXEL BUILDER</div>
+            <div id="stats-panel">
+                <div class="stat-row">
+                    <span class="stat-label">BLOCKS</span>
+                    <span class="stat-value" id="block-count">0</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">HEIGHT</span>
+                    <span class="stat-value" id="player-height">0.0</span>
+                </div>
             </div>
-
-            <hr style="border-color:#555; margin: 30px 0;">
-
-            <h2>Raycasting Debug Controls</h2>
-
-            <div class="setting-group">
-                <label for="distance-slider">Max Raycast Distance (0.1 to 10):</label>
-                <input type="range" id="distance-slider" min="0.1" max="10.0" step="0.1" value="8.0">
-                <span id="distance-value">8.0</span>
-            </div>
-            
         </div>
 
+        <!-- Crosshair -->
+        <div id="crosshair"></div>
+
+        <!-- Block Break Progress -->
+        <div id="break-progress">
+            <div id="break-progress-fill"></div>
+        </div>
+
+        <!-- Block Hotbar -->
+        <div id="hotbar">
+            <div class="hotbar-slot active" data-index="1">
+                <span class="slot-number">1</span>
+                <div class="slot-icon" style="background: linear-gradient(180deg, #7cba3a 0%, #5a8a2a 50%, #4a6622 100%);"></div>
+                <div class="slot-name">GRASS</div>
+            </div>
+            <div class="hotbar-slot" data-index="2">
+                <span class="slot-number">2</span>
+                <div class="slot-icon" style="background: linear-gradient(180deg, #999 0%, #666 50%, #444 100%);"></div>
+                <div class="slot-name">STONE</div>
+            </div>
+            <div class="hotbar-slot" data-index="3">
+                <span class="slot-number">3</span>
+                <div class="slot-icon" style="background: linear-gradient(180deg, #b8976a 0%, #8b6f47 50%, #654321 100%);"></div>
+                <div class="slot-name">WOOD</div>
+            </div>
+        </div>
+
+        <!-- Controls Guide -->
+        <div id="controls-guide">
+            <div class="control-section">
+                <div class="control-title">Movement</div>
+                <div class="control-item">
+                    <span class="control-key">W/A/S/D</span>
+                    <span class="control-action">Move</span>
+                </div>
+                <div class="control-item">
+                    <span class="control-key">SPACE</span>
+                    <span class="control-action">Jump</span>
+                </div>
+            </div>
+            <div class="control-section">
+                <div class="control-title">Building</div>
+                <div class="control-item">
+                    <span class="control-key">CLICK</span>
+                    <span class="control-action">Place Block</span>
+                </div>
+                <div class="control-item">
+                    <span class="control-key">SHIFT</span>
+                    <span class="control-action">Remove Block</span>
+                </div>
+            </div>
+            <div class="control-section">
+                <div class="control-title">Menu</div>
+                <div class="control-item">
+                    <span class="control-key">P</span>
+                    <span class="control-action">Pause</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Notification -->
+        <div id="notification"></div>
+    </div>
+
+    <!-- Pause Menu -->
+    <div id="pause-menu">
+        <div class="menu-container">
+            <h1 class="menu-title">PAUSED</h1>
+            
+            <div class="menu-buttons">
+                <button class="menu-btn" id="resume-button">
+                    <span>Resume Game</span>
+                </button>
+                <button class="menu-btn" id="settings-button">
+                    <span>Settings</span>
+                </button>
+            </div>
+
+            <div id="settings-panel">
+                <h2 class="settings-title">Settings</h2>
+                
+                <div class="setting-group">
+                    <label for="sensitivity-slider">Movement Sensitivity</label>
+                    <div class="slider-container">
+                        <input type="range" id="sensitivity-slider" min="0.1" max="2.0" step="0.05" value="1.0">
+                        <span class="slider-value" id="sensitivity-value">1.00</span>
+                    </div>
+                </div>
+
+                <div class="setting-group">
+                    <label for="distance-slider">Raycast Distance</label>
+                    <div class="slider-container">
+                        <input type="range" id="distance-slider" min="0.1" max="10.0" step="0.1" value="8.0">
+                        <span class="slider-value" id="distance-value">8.0</span>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
 
     <script>
         // --- CONSTANTS ---
-        // FIX 1: Adjust constants for Minecraft-style player (1 block wide, 2 blocks tall)
-        const PLAYER_HEIGHT = 1.8;        // Full body height
-const PLAYER_EYE_HEIGHT = 1.62;   // Minecraft eye height
-const PLAYER_HALF_WIDTH = 0.3;    // 0.6 blocks wide
-
+        const PLAYER_HEIGHT = 1.8;
+        const PLAYER_EYE_HEIGHT = 1.62;
+        const PLAYER_HALF_WIDTH = 0.3;
         
         const GRAVITY = 30.0; 
         const JUMP_VELOCITY = 9.5; 
-        const GROUND_Y = 0.5; // Center Y of the initial ground layer
+        const GROUND_Y = 0.5;
         
+        const BLOCK_HARDNESS = {
+    Grass: 0.3,
+    Wood: 0.6,
+    Stone: 1.5
+};
+
+// --- INVENTORY ---
+const inventory = {
+    1: { name: 'Grass', count: 0 },
+    2: { name: 'Stone', count: 0 },
+    3: { name: 'Wood', count: 0 }
+};
+
+
+        let isBreaking = false;
+let breakTarget = null;
+let breakProgress = 0;
+
+
         // --- SCENE SETUP VARIABLES ---
         let camera, scene, renderer, raycaster;
         const pointer = new THREE.Vector2();
         let controls;
         const objects = []; 
 
-        // --- OCCUPANCY MAP (fast block lookup) ---
+        // --- OCCUPANCY MAP ---
         const occ = new Map(); 
 
         function keyFromCenter(x, y, z) {
@@ -203,11 +785,11 @@ const PLAYER_HALF_WIDTH = 0.3;    // 0.6 blocks wide
         const cubeGeometry = new THREE.BoxGeometry(1, 1, 1);
         
         // --- VISUAL FEEDBACK MESHES ---
-        const rollOverMaterial = new THREE.MeshBasicMaterial({ color: 0xff0000, opacity: 0.5, transparent: true, wireframe: true });
+        const rollOverMaterial = new THREE.MeshBasicMaterial({ color: 0x00ff88, opacity: 0.4, transparent: true, wireframe: true });
         const rollOverMesh = new THREE.Mesh(cubeGeometry, rollOverMaterial);
         
         const highlightGeometry = new THREE.BoxGeometry(1.02, 1.02, 1.02); 
-        const highlightMaterial = new THREE.MeshBasicMaterial({ color: 0x000000, wireframe: true, opacity: 0.2, transparent: true });
+        const highlightMaterial = new THREE.MeshBasicMaterial({ color: 0x00ff88, wireframe: true, opacity: 0.3, transparent: true });
         const highlightMesh = new THREE.Mesh(highlightGeometry, highlightMaterial);
 
         // --- GAME STATE & SETTINGS ---
@@ -224,18 +806,109 @@ const PLAYER_HALF_WIDTH = 0.3;    // 0.6 blocks wide
         let movementSpeed = 40.0; 
         let sensitivity = 1.0; 
         
-        let maxRaycastDistance = 8.0; 
+        let maxRaycastDistance = 8.0;
+        let blockCount = 0;
         
-        // --- VECTORS FOR RELATIVE MOVEMENT ---
         const forwardVector = new THREE.Vector3();
         const rightVector = new THREE.Vector3();
-
 
         init();
         animate();
         
-        // --- CORE FUNCTIONS ---
+        // --- UI FUNCTIONS ---
+        function updateBlockCount(change) {
+            blockCount += change;
+            document.getElementById('block-count').textContent = blockCount;
+        }
 
+        function spawnResourceBlocks(count = 80) {
+    const types = [1, 2, 3]; // Grass, Stone, Wood
+    const half = planeSize / 2;
+
+    let spawned = 0;
+    let attempts = 0;
+
+    while (spawned < count && attempts < count * 10) {
+        attempts++;
+
+        const x = Math.floor(Math.random() * planeSize - half) + 0.5;
+        const z = Math.floor(Math.random() * planeSize - half) + 0.5;
+        const y = GROUND_Y + 1 + Math.floor(Math.random() * 4);
+
+        // Prevent overlap
+        if (getBlockAtCenter(x, y, z)) continue;
+
+        const type = types[Math.floor(Math.random() * types.length)];
+        const voxel = new THREE.Mesh(
+            cubeGeometry,
+            materials[type].material
+        );
+
+        voxel.position.set(x, y, z);
+        scene.add(voxel);
+        objects.push(voxel);
+        registerBlock(voxel);
+
+        updateBlockCount(1);
+        spawned++;
+    }
+}
+
+
+        function updatePlayerHeight() {
+            const height = (controls.getObject().position.y - PLAYER_EYE_HEIGHT).toFixed(1);
+            document.getElementById('player-height').textContent = height + 'm';
+        }
+
+        function showNotification(message, duration = 2000) {
+            const notif = document.getElementById('notification');
+            notif.textContent = message;
+            notif.style.display = 'block';
+            setTimeout(() => {
+                notif.style.display = 'none';
+            }, duration);
+        }
+
+        function switchBlock(index) {
+            if (materials[index]) {
+                currentMaterialIndex = index;
+                
+                // Update hotbar visuals
+                document.querySelectorAll('.hotbar-slot').forEach(slot => {
+                    slot.classList.remove('active');
+                });
+                document.querySelector(`.hotbar-slot[data-index="${index}"]`).classList.add('active');
+                
+                showNotification(`Selected: ${materials[index].name}`);
+            }
+        }
+
+        function updateInventoryUI() {
+    document.querySelectorAll('.hotbar-slot').forEach(slot => {
+        const index = parseInt(slot.dataset.index);
+        if (!inventory[index]) return;
+
+        let countEl = slot.querySelector('.slot-count');
+
+        if (!countEl) {
+            countEl = document.createElement('div');
+            countEl.className = 'slot-count';
+            countEl.style.position = 'absolute';
+            countEl.style.bottom = '6px';
+            countEl.style.right = '8px';
+            countEl.style.fontSize = '14px';
+            countEl.style.fontWeight = '700';
+            countEl.style.color = '#00ff88';
+            slot.appendChild(countEl);
+        }
+
+        countEl.textContent = inventory[index].count;
+    });
+}
+
+
+
+        // --- CORE FUNCTIONS ---
         function init() {
             renderer = new THREE.WebGLRenderer({ antialias: true });
             renderer.setPixelRatio(window.devicePixelRatio);
@@ -245,13 +918,12 @@ const PLAYER_HALF_WIDTH = 0.3;    // 0.6 blocks wide
 
             scene = new THREE.Scene();
             scene.background = new THREE.Color(0x90c0e0);
+            scene.fog = new THREE.Fog(0x90c0e0, 50, 200);
             
             camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
             
-            // Set initial camera Y based on ground surface (1.0) + eye offset (1.7) = 2.7
             const feetY = GROUND_Y + 0.5;
-camera.position.set(0, feetY + PLAYER_EYE_HEIGHT, 20);
-
+            camera.position.set(0, feetY + PLAYER_EYE_HEIGHT, 20);
             
             raycaster = new THREE.Raycaster();
             raycaster.far = maxRaycastDistance;
@@ -269,6 +941,9 @@ camera.position.set(0, feetY + PLAYER_EYE_HEIGHT, 20);
                     registerBlock(block);
                 }
             }
+            
+            blockCount = objects.length;
+            document.getElementById('block-count').textContent = blockCount;
             
             scene.add(rollOverMesh);
             scene.add(highlightMesh);
@@ -289,11 +964,21 @@ camera.position.set(0, feetY + PLAYER_EYE_HEIGHT, 20);
             document.addEventListener('keydown', onKeyDown);
             document.addEventListener('keyup', onKeyUp);
             
-            document.body.addEventListener('click', () => {
-                if (!controls.isLocked && !isPaused) {
-                    controls.lock();
-                }
-            }, false);
+            // Start overlay
+            document.getElementById('start-overlay').addEventListener('click', () => {
+                document.getElementById('start-overlay').classList.add('hidden');
+                controls.lock();
+            });
+            
+            // Hotbar clicks
+            document.querySelectorAll('.hotbar-slot').forEach(slot => {
+                slot.addEventListener('click', (e) => {
+                    if (!controls.isLocked) {
+                        const index = parseInt(slot.getAttribute('data-index'));
+                        switchBlock(index);
+                    }
+                });
+            });
             
             document.getElementById('resume-button').addEventListener('click', togglePause);
             
@@ -302,7 +987,7 @@ camera.position.set(0, feetY + PLAYER_EYE_HEIGHT, 20);
             settingsButton.addEventListener('click', () => {
                 const isHidden = settingsPanel.style.display === 'none';
                 settingsPanel.style.display = isHidden ? 'block' : 'none';
-                settingsButton.textContent = isHidden ? 'CLOSE SETTINGS' : 'SETTINGS';
+                settingsButton.querySelector('span').textContent = isHidden ? 'Close Settings' : 'Settings';
             });
             
             const sensSlider = document.getElementById('sensitivity-slider');
@@ -323,11 +1008,22 @@ camera.position.set(0, feetY + PLAYER_EYE_HEIGHT, 20);
             controls.addEventListener('lock', () => {
                 isPaused = false;
                 document.getElementById('pause-menu').style.display = 'none';
-                document.getElementById('crosshair').style.display = 'block';
-                document.getElementById('block-indicator').style.display = 'block';
+                document.getElementById('hud-container').style.display = 'block';
+            });
+
+            controls.addEventListener('unlock', () => {
+                if (!document.getElementById('start-overlay').classList.contains('hidden')) return;
+                isPaused = true;
+                document.getElementById('pause-menu').style.display = 'block';
+                document.getElementById('hud-container').style.display = 'none';
             });
             
-            canJump = true; 
+            updateInventoryUI();
+
+
+            canJump = true;
+            spawnResourceBlocks(120);
+
         }
         
         function onWindowResize() {
@@ -339,107 +1035,103 @@ camera.position.set(0, feetY + PLAYER_EYE_HEIGHT, 20);
         function togglePause() {
             if (controls.isLocked) {
                 controls.unlock();
-                isPaused = true;
-                document.getElementById('pause-menu').style.display = 'block';
-                document.getElementById('crosshair').style.display = 'none';
-                document.getElementById('block-indicator').style.display = 'none';
-                document.getElementById('settings-panel').style.display = 'none';
-                document.getElementById('settings-button').textContent = 'SETTINGS';
             } else if (isPaused) {
                 controls.lock();
             }
         }
         
         function onDocumentMouseDown(event) {
-  if (isPaused || !controls.isLocked) return;
+    if (isPaused || !controls.isLocked) return;
 
-  raycaster.setFromCamera(pointer, camera);
-  const intersects = raycaster.intersectObjects(objects, false);
+    raycaster.setFromCamera(pointer, camera);
+    const intersects = raycaster.intersectObjects(objects, false);
 
-  if (!intersects.length) return;
+    if (!intersects.length) return;
 
-  const intersect = intersects[0];
+    const intersect = intersects[0];
 
-  // -----------------------------
-  // PLACE BLOCK
-  // -----------------------------
-  if (event.button === 0 && !event.shiftKey) {
-    const hitPos = intersect.object.position.clone();
-    const newPos = hitPos.add(intersect.face.normal);
-    snapVec3ToCenters(newPos);
+    // PLACE BLOCK
+    if (event.button === 0 && !event.shiftKey) {
 
-    // --- PLAYER FEET-BASED BOUNDS ---
-    const playerPos = controls.getObject().position;
-    const feetY = playerPos.y - PLAYER_EYE_HEIGHT;
+        // INVENTORY CHECK
+        if (inventory[currentMaterialIndex].count <= 0) {
+            showNotification('No blocks available');
+            return;
+        }
 
-    const pMin = {
-      x: playerPos.x - PLAYER_HALF_WIDTH,
-      y: feetY,
-      z: playerPos.z - PLAYER_HALF_WIDTH
-    };
+        const hitPos = intersect.object.position.clone();
+        const newPos = hitPos.add(intersect.face.normal);
+        snapVec3ToCenters(newPos);
 
-    const pMax = {
-      x: playerPos.x + PLAYER_HALF_WIDTH,
-      y: feetY + PLAYER_HEIGHT,
-      z: playerPos.z + PLAYER_HALF_WIDTH
-    };
+        const playerPos = controls.getObject().position;
+        const feetY = playerPos.y - PLAYER_EYE_HEIGHT;
 
-    // Block AABB
-    const bMin = {
-      x: newPos.x - 0.5,
-      y: newPos.y - 0.5,
-      z: newPos.z - 0.5
-    };
+        const pMin = {
+            x: playerPos.x - PLAYER_HALF_WIDTH,
+            y: feetY,
+            z: playerPos.z - PLAYER_HALF_WIDTH
+        };
 
-    const bMax = {
-      x: newPos.x + 0.5,
-      y: newPos.y + 0.5,
-      z: newPos.z + 0.5
-    };
+        const pMax = {
+            x: playerPos.x + PLAYER_HALF_WIDTH,
+            y: feetY + PLAYER_HEIGHT,
+            z: playerPos.z + PLAYER_HALF_WIDTH
+        };
 
-    // Prevent placing inside player
-    const intersectsPlayer =
-      bMax.x > pMin.x && bMin.x < pMax.x &&
-      bMax.y > pMin.y && bMin.y < pMax.y &&
-      bMax.z > pMin.z && bMin.z < pMax.z;
+        const bMin = {
+            x: newPos.x - 0.5,
+            y: newPos.y - 0.5,
+            z: newPos.z - 0.5
+        };
 
-    if (intersectsPlayer) return;
+        const bMax = {
+            x: newPos.x + 0.5,
+            y: newPos.y + 0.5,
+            z: newPos.z + 0.5
+        };
 
-    // Prevent duplicate blocks
-    if (getBlockAtCenter(newPos.x, newPos.y, newPos.z)) return;
+        const intersectsPlayer =
+            bMax.x > pMin.x && bMin.x < pMax.x &&
+            bMax.y > pMin.y && bMin.y < pMax.y &&
+            bMax.z > pMin.z && bMin.z < pMax.z;
 
-    const voxel = new THREE.Mesh(
-      cubeGeometry,
-      materials[currentMaterialIndex].material
-    );
+        if (intersectsPlayer) return;
+        if (getBlockAtCenter(newPos.x, newPos.y, newPos.z)) return;
 
-    voxel.position.copy(newPos);
-    scene.add(voxel);
-    objects.push(voxel);
-    registerBlock(voxel);
-  }
+        const voxel = new THREE.Mesh(
+            cubeGeometry,
+            materials[currentMaterialIndex].material
+        );
 
-  // -----------------------------
-  // REMOVE BLOCK
-  // -----------------------------
-  if (event.button === 0 && event.shiftKey) {
-    if (intersect.object.position.y === GROUND_Y) return;
+        voxel.position.copy(newPos);
+        scene.add(voxel);
+        objects.push(voxel);
+        registerBlock(voxel);
+        updateBlockCount(1);
 
-    scene.remove(intersect.object);
-    unregisterBlock(intersect.object);
-    objects.splice(objects.indexOf(intersect.object), 1);
-  }
+        inventory[currentMaterialIndex].count--;
+        updateInventoryUI();
+    }
+
+    // START BREAKING
+    if (event.button === 0 && event.shiftKey) {
+        isBreaking = true;
+    }
 }
+
+
+        document.addEventListener('mouseup', () => {
+    isBreaking = false;
+    breakTarget = null;
+    breakProgress = 0;
+    document.getElementById('break-progress').style.display = 'none';
+});
 
         
         function onKeyDown(event) {
-            
             if (controls.isLocked && event.code.startsWith('Digit')) {
                 const index = parseInt(event.key);
-                if (materials[index]) {
-                    currentMaterialIndex = index;
-                    document.getElementById('block-indicator').textContent = `Block Type: ${materials[index].name} (${index})`;
-                }
+                switchBlock(index);
             }
 
             if (isPaused) return;
@@ -450,7 +1142,10 @@ camera.position.set(0, feetY + PLAYER_EYE_HEIGHT, 20);
                 case 'KeyA': moveLeft = true; break;
                 case 'KeyD': moveRight = true; break;
                 
-                case 'KeyP': togglePause(); break;
+                case 'KeyP': 
+                case 'Escape':
+                    togglePause(); 
+                    break;
                 
                 case 'Space': 
                     if (canJump === true) {
@@ -470,173 +1165,202 @@ camera.position.set(0, feetY + PLAYER_EYE_HEIGHT, 20);
             }
         }
 
-        // --- COLLISION CHECK FUNCTION (Uses bounding box centered on camera Y) ---
         function collidesAt(feetX, feetY, feetZ) {
-  const minX = Math.floor(feetX - PLAYER_HALF_WIDTH);
-  const maxX = Math.floor(feetX + PLAYER_HALF_WIDTH);
+            const minX = Math.floor(feetX - PLAYER_HALF_WIDTH);
+            const maxX = Math.floor(feetX + PLAYER_HALF_WIDTH);
 
-  const minY = Math.floor(feetY);
-  const maxY = Math.floor(feetY + PLAYER_HEIGHT);
+            const minY = Math.floor(feetY);
+            const maxY = Math.floor(feetY + PLAYER_HEIGHT);
 
-  const minZ = Math.floor(feetZ - PLAYER_HALF_WIDTH);
-  const maxZ = Math.floor(feetZ + PLAYER_HALF_WIDTH);
+            const minZ = Math.floor(feetZ - PLAYER_HALF_WIDTH);
+            const maxZ = Math.floor(feetZ + PLAYER_HALF_WIDTH);
 
-  for (let x = minX; x <= maxX; x++) {
-    for (let y = minY; y <= maxY; y++) {
-      for (let z = minZ; z <= maxZ; z++) {
-        if (getBlockAtCenter(x + 0.5, y + 0.5, z + 0.5)) {
-          return { x, y, z };
+            for (let x = minX; x <= maxX; x++) {
+                for (let y = minY; y <= maxY; y++) {
+                    for (let z = minZ; z <= maxZ; z++) {
+                        if (getBlockAtCenter(x + 0.5, y + 0.5, z + 0.5)) {
+                            return { x, y, z };
+                        }
+                    }
+                }
+            }
+            return null;
         }
-      }
-    }
-  }
-  return null;
-}
-
 
         function animate() {
-  requestAnimationFrame(animate);
+            requestAnimationFrame(animate);
 
-  const delta = clock.getDelta();
-  const eps = 0.001;
+            const delta = clock.getDelta();
+            const eps = 0.001;
 
-  if (controls.isLocked) {
+            if (controls.isLocked) {
+                velocity.x -= velocity.x * 10.0 * delta;
+                velocity.z -= velocity.z * 10.0 * delta;
+                velocity.y -= GRAVITY * delta;
 
-    // -----------------------------
-    // PHYSICS INTEGRATION
-    // -----------------------------
-    velocity.x -= velocity.x * 10.0 * delta;
-    velocity.z -= velocity.z * 10.0 * delta;
-    velocity.y -= GRAVITY * delta;
+                const speed = movementSpeed * sensitivity;
+                const player = controls.getObject();
+                const pos = player.position;
 
-    const speed = movementSpeed * sensitivity;
-    const player = controls.getObject();
-    const pos = player.position;
+                player.getWorldDirection(forwardVector);
+                forwardVector.y = 0;
+                forwardVector.normalize();
 
-    // -----------------------------
-    // DIRECTION VECTORS (WORLD)
-    // -----------------------------
-    player.getWorldDirection(forwardVector);
-    forwardVector.y = 0;
-    forwardVector.normalize();
+                rightVector.set(
+                    -forwardVector.z,
+                    0,
+                    forwardVector.x
+                );
 
-    rightVector.set(
-      -forwardVector.z,
-      0,
-      forwardVector.x
-    );
+                if (moveForward) {
+                    velocity.x -= forwardVector.x * speed * delta;
+                    velocity.z -= forwardVector.z * speed * delta;
+                }
+                if (moveBackward) {
+                    velocity.x += forwardVector.x * speed * delta;
+                    velocity.z += forwardVector.z * speed * delta;
+                }
+                if (moveRight) {
+                    velocity.x -= rightVector.x * speed * delta;
+                    velocity.z -= rightVector.z * speed * delta;
+                }
+                if (moveLeft) {
+                    velocity.x += rightVector.x * speed * delta;
+                    velocity.z += rightVector.z * speed * delta;
+                }
 
-    if (moveForward) {
-      velocity.x -= forwardVector.x * speed * delta;
-      velocity.z -= forwardVector.z * speed * delta;
+                const feetY = pos.y - PLAYER_EYE_HEIGHT;
+                const dx = -velocity.x * delta;
+                const dz = -velocity.z * delta;
+                const nextFeetY = feetY + velocity.y * delta;
+
+                // X AXIS
+                if (dx !== 0) {
+                    const nx = pos.x + dx;
+                    const hitX = collidesAt(nx, feetY, pos.z);
+
+                    if (!hitX) {
+                        pos.x = nx;
+                    } else {
+                        velocity.x = 0;
+                        pos.x = dx > 0
+                            ? hitX.x - PLAYER_HALF_WIDTH - eps
+                            : hitX.x + 1 + PLAYER_HALF_WIDTH + eps;
+                    }
+                }
+
+                // Z AXIS
+                if (dz !== 0) {
+                    const nz = pos.z + dz;
+                    const hitZ = collidesAt(pos.x, feetY, nz);
+
+                    if (!hitZ) {
+                        pos.z = nz;
+                    } else {
+                        velocity.z = 0;
+                        pos.z = dz > 0
+                            ? hitZ.z - PLAYER_HALF_WIDTH - eps
+                            : hitZ.z + 1 + PLAYER_HALF_WIDTH + eps;
+                    }
+                }
+
+                // Y AXIS
+                const hitY = collidesAt(pos.x, nextFeetY, pos.z);
+
+                if (!hitY) {
+                    pos.y = nextFeetY + PLAYER_EYE_HEIGHT;
+                    canJump = false;
+                } else {
+                    if (velocity.y < 0) {
+                        velocity.y = 0;
+                        pos.y = hitY.y + 1 + PLAYER_EYE_HEIGHT + eps;
+                        canJump = true;
+                    } else {
+                        velocity.y = 0;
+                        pos.y = hitY.y - (PLAYER_HEIGHT - PLAYER_EYE_HEIGHT) - eps;
+                    }
+                }
+
+                updatePlayerHeight();
+            }
+
+            // RAYCAST VISUALS
+            raycaster.setFromCamera(pointer, camera);
+            raycaster.far = maxRaycastDistance;
+
+            const intersects = raycaster.intersectObjects(objects, false);
+
+            if (intersects.length > 0) {
+                const intersect = intersects[0];
+                const normal = intersect.face.normal;
+                const hitPos = intersect.object.position.clone();
+                const newPos = hitPos.add(normal);
+                snapVec3ToCenters(newPos);
+
+                rollOverMesh.position.copy(newPos);
+                rollOverMesh.visible = !isPaused;
+
+                highlightMesh.position.copy(intersect.object.position);
+                highlightMesh.visible = !isPaused;
+            } else {
+                rollOverMesh.visible = false;
+                highlightMesh.visible = false;
+            }
+
+            renderer.render(scene, camera);
+
+            // -----------------------------
+// BLOCK BREAKING LOGIC
+// -----------------------------
+if (isBreaking && intersects.length > 0) {
+    const hit = intersects[0];
+    const block = hit.object;
+
+    if (block.position.y !== GROUND_Y) {
+
+        if (breakTarget !== block) {
+            breakTarget = block;
+            breakProgress = 0;
+        }
+
+        const materialEntry = Object.entries(materials)
+            .find(([_, m]) => m.material === block.material);
+
+        const materialName = materialEntry ? materialEntry[1].name : null;
+        const materialIndex = materialEntry ? parseInt(materialEntry[0]) : null;
+
+        const hardness = BLOCK_HARDNESS[materialName] || 1.0;
+        breakProgress += delta;
+
+        const progressRatio = Math.min(breakProgress / hardness, 1);
+        const bar = document.getElementById('break-progress');
+        const fill = document.getElementById('break-progress-fill');
+
+        bar.style.display = 'block';
+        fill.style.width = `${progressRatio * 100}%`;
+
+        if (progressRatio >= 1) {
+            scene.remove(block);
+            unregisterBlock(block);
+            objects.splice(objects.indexOf(block), 1);
+            updateBlockCount(-1);
+
+            // ADD TO INVENTORY
+            if (materialIndex && inventory[materialIndex]) {
+                inventory[materialIndex].count++;
+                updateInventoryUI();
+            }
+
+            isBreaking = false;
+            breakTarget = null;
+            breakProgress = 0;
+            bar.style.display = 'none';
+        }
     }
-    if (moveBackward) {
-      velocity.x += forwardVector.x * speed * delta;
-      velocity.z += forwardVector.z * speed * delta;
-    }
-    if (moveRight) {
-      velocity.x -= rightVector.x * speed * delta;
-      velocity.z -= rightVector.z * speed * delta;
-    }
-    if (moveLeft) {
-      velocity.x += rightVector.x * speed * delta;
-      velocity.z += rightVector.z * speed * delta;
-    }
-
-    // -----------------------------
-    // FEET-BASED POSITION
-    // -----------------------------
-    const feetY = pos.y - PLAYER_EYE_HEIGHT;
-
-    const dx = -velocity.x * delta;
-    const dz = -velocity.z * delta;
-    const nextFeetY = feetY + velocity.y * delta;
-
-    // -----------------------------
-    // X AXIS COLLISION
-    // -----------------------------
-    if (dx !== 0) {
-      const nx = pos.x + dx;
-      const hitX = collidesAt(nx, feetY, pos.z);
-
-      if (!hitX) {
-        pos.x = nx;
-      } else {
-        velocity.x = 0;
-        pos.x = dx > 0
-          ? hitX.x - PLAYER_HALF_WIDTH - eps
-          : hitX.x + 1 + PLAYER_HALF_WIDTH + eps;
-      }
-    }
-
-    // -----------------------------
-    // Z AXIS COLLISION
-    // -----------------------------
-    if (dz !== 0) {
-      const nz = pos.z + dz;
-      const hitZ = collidesAt(pos.x, feetY, nz);
-
-      if (!hitZ) {
-        pos.z = nz;
-      } else {
-        velocity.z = 0;
-        pos.z = dz > 0
-          ? hitZ.z - PLAYER_HALF_WIDTH - eps
-          : hitZ.z + 1 + PLAYER_HALF_WIDTH + eps;
-      }
-    }
-
-    // -----------------------------
-    // Y AXIS COLLISION (NO BOUNCE)
-    // -----------------------------
-    const hitY = collidesAt(pos.x, nextFeetY, pos.z);
-
-    if (!hitY) {
-      pos.y = nextFeetY + PLAYER_EYE_HEIGHT;
-      canJump = false;
-    } else {
-      if (velocity.y < 0) {
-        // Landing on ground
-        velocity.y = 0;
-        pos.y = hitY.y + 1 + PLAYER_EYE_HEIGHT + eps;
-        canJump = true;
-      } else {
-        // Hitting head
-        velocity.y = 0;
-        pos.y = hitY.y - (PLAYER_HEIGHT - PLAYER_EYE_HEIGHT) - eps;
-      }
-    }
-  }
-
-  // -----------------------------
-  // RAYCAST VISUALS
-  // -----------------------------
-  raycaster.setFromCamera(pointer, camera);
-  raycaster.far = maxRaycastDistance;
-
-  const intersects = raycaster.intersectObjects(objects, false);
-
-  if (intersects.length > 0) {
-    const intersect = intersects[0];
-
-    const normal = intersect.face.normal;
-    const hitPos = intersect.object.position.clone();
-    const newPos = hitPos.add(normal);
-    snapVec3ToCenters(newPos);
-
-    rollOverMesh.position.copy(newPos);
-    rollOverMesh.visible = !isPaused;
-
-    highlightMesh.position.copy(intersect.object.position);
-    highlightMesh.visible = !isPaused;
-  } else {
-    rollOverMesh.visible = false;
-    highlightMesh.visible = false;
-  }
-
-  renderer.render(scene, camera);
+} else {
+    document.getElementById('break-progress').style.display = 'none';
 }
-
+        }
     </script>
 </body>
 </html>

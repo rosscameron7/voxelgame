@@ -1,0 +1,625 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Voxel Builder (Relative Movement Fixed)</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #222; user-select: none; }
+        canvas { display: block; }
+
+        /* --- INFO BAR --- */
+        #info {
+            position: absolute;
+            top: 10px;
+            width: 100%;
+            text-align: center;
+            color: white;
+            font-family: Arial, sans-serif;
+            z-index: 100;
+            text-shadow: 1px 1px 2px black;
+        }
+
+        /* --- CROSSHAIR & BLOCK INDICATOR --- */
+        #crosshair {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 10px;
+            height: 10px;
+            margin-top: -5px; 
+            margin-left: -5px; 
+            border: 2px solid white;
+            border-radius: 50%; 
+            box-shadow: 0 0 5px rgba(0, 0, 0, 0.5);
+            pointer-events: none; 
+            z-index: 1000;
+        }
+        
+        #block-indicator {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 8px 15px;
+            background-color: rgba(0, 0, 0, 0.7);
+            color: white;
+            font-family: Arial, sans-serif;
+            border-radius: 5px;
+            z-index: 1000;
+            min-width: 150px;
+            text-align: center;
+        }
+
+        /* --- PAUSE MENU --- */
+        #pause-menu {
+            display: none; 
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.85);
+            z-index: 2000;
+            color: white;
+            font-family: Arial, sans-serif;
+            text-align: center;
+            padding-top: 10vh; 
+        }
+        
+        #pause-menu button {
+            background-color: #4CAF50;
+            color: white;
+            padding: 10px 20px;
+            margin: 10px;
+            border: none;
+            cursor: pointer;
+            font-size: 1.1em;
+            border-radius: 5px;
+        }
+
+        #pause-menu h1 { margin-bottom: 20px; }
+
+        .setting-group { margin: 20px auto; width: 350px; text-align: left; }
+        .setting-group label { display: block; margin-bottom: 5px; font-size: 1.1em; }
+        .setting-group input[type="range"] { width: 100%; margin-top: 5px; }
+        .setting-group span { display: inline-block; width: 40px; text-align: right; margin-left: 10px; }
+    </style>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://unpkg.com/three@0.128.0/examples/js/controls/PointerLockControls.js"></script>
+</head>
+<body>
+    <div id="info">
+        Voxel Builder | W/A/S/D to move | **SPACEBAR to Jump** | **1/2/3 to Switch Block** | Click to **Place** | Shift + Click to **Remove** | **P to Pause**
+    </div>
+    
+    <div id="crosshair"></div>
+    <div id="block-indicator">Block Type: Grass (1)</div>
+
+    <div id="pause-menu">
+        <h1>PAUSED</h1>
+        
+        <button id="resume-button">RESUME (P)</button>
+        <button id="settings-button">SETTINGS</button>
+
+        <div id="settings-panel" style="display:none; margin-top: 30px;">
+            <h2>Gameplay Settings</h2>
+            
+            <div class="setting-group">
+                <label for="sensitivity-slider">Movement Sensitivity:</label>
+                <input type="range" id="sensitivity-slider" min="0.1" max="2.0" step="0.05" value="1.0">
+                <span id="sensitivity-value">1.00</span>
+            </div>
+
+            <hr style="border-color:#555; margin: 30px 0;">
+
+            <h2>Raycasting Debug Controls</h2>
+
+            <div class="setting-group">
+                <label for="distance-slider">Max Raycast Distance (0.1 to 10):</label>
+                <input type="range" id="distance-slider" min="0.1" max="10.0" step="0.1" value="8.0">
+                <span id="distance-value">8.0</span>
+            </div>
+            
+        </div>
+
+    </div>
+
+    <script>
+        // --- CONSTANTS ---
+        const PLAYER_HEIGHT = 4.0; 
+        const PLAYER_EYE_HEIGHT = 3.8; 
+        const PLAYER_HALF_WIDTH = 0.4; 
+        const GRAVITY = 30.0; 
+        const JUMP_VELOCITY = 9.5; 
+        const GROUND_Y = 0.5; 
+        
+        // --- SCENE SETUP VARIABLES ---
+        let camera, scene, renderer, raycaster;
+        const pointer = new THREE.Vector2();
+        let controls;
+        const objects = []; 
+
+        // --- OCCUPANCY MAP (fast block lookup) ---
+        const occ = new Map(); 
+
+        function keyFromCenter(x, y, z) {
+            return `${x.toFixed(1)}|${y.toFixed(1)}|${z.toFixed(1)}`;
+        }
+
+        function snapCenter(v) {
+            return Math.round(v - 0.5) + 0.5;
+        }
+
+        function snapVec3ToCenters(vec) {
+            vec.x = snapCenter(vec.x);
+            vec.y = snapCenter(vec.y);
+            vec.z = snapCenter(vec.z);
+            return vec;
+        }
+
+        function registerBlock(mesh) {
+            const k = keyFromCenter(mesh.position.x, mesh.position.y, mesh.position.z);
+            occ.set(k, mesh);
+        }
+
+        function unregisterBlock(mesh) {
+            const k = keyFromCenter(mesh.position.x, mesh.position.y, mesh.position.z);
+            occ.delete(k);
+        }
+
+        function getBlockAtCenter(x, y, z) {
+            return occ.get(keyFromCenter(x, y, z)) || null;
+        }
+
+        const planeSize = 50;
+        
+        // --- TEXTURE LOADER & MATERIALS ---
+        const textureLoader = new THREE.TextureLoader();
+
+        const textures = {
+            1: textureLoader.load('textures/grass.png'),
+            2: textureLoader.load('textures/stone.png'),
+            3: textureLoader.load('textures/wood.png')
+        };
+
+        Object.values(textures).forEach(texture => {
+            texture.magFilter = THREE.NearestFilter;
+            texture.minFilter = THREE.NearestFilter;
+        });
+
+        const materials = {
+            1: { name: 'Grass', material: new THREE.MeshLambertMaterial({ map: textures[1] }) },
+            2: { name: 'Stone', material: new THREE.MeshLambertMaterial({ map: textures[2] }) },
+            3: { name: 'Wood', material: new THREE.MeshLambertMaterial({ map: textures[3] }) }
+        };
+        let currentMaterialIndex = 1;
+
+        // --- BLOCK GEOMETRY ---
+        const cubeGeometry = new THREE.BoxGeometry(1, 1, 1);
+        
+        // --- VISUAL FEEDBACK MESHES ---
+        const rollOverMaterial = new THREE.MeshBasicMaterial({ color: 0xff0000, opacity: 0.5, transparent: true, wireframe: true });
+        const rollOverMesh = new THREE.Mesh(cubeGeometry, rollOverMaterial);
+        
+        const highlightGeometry = new THREE.BoxGeometry(1.02, 1.02, 1.02); 
+        const highlightMaterial = new THREE.MeshBasicMaterial({ color: 0x000000, wireframe: true, opacity: 0.2, transparent: true });
+        const highlightMesh = new THREE.Mesh(highlightGeometry, highlightMaterial);
+
+        // --- GAME STATE & SETTINGS ---
+        let moveForward = false;
+        let moveBackward = false;
+        let moveLeft = false;
+        let moveRight = false;
+        let canJump = false; 
+        
+        let velocity = new THREE.Vector3();
+        // Removed `direction` since we now use camera's world direction
+        const clock = new THREE.Clock();
+        
+        let isPaused = false;
+        let movementSpeed = 40.0; 
+        let sensitivity = 1.0; 
+        
+        let maxRaycastDistance = 8.0; 
+        
+        // --- VECTORS FOR RELATIVE MOVEMENT ---
+        const forwardVector = new THREE.Vector3();
+        const rightVector = new THREE.Vector3();
+        const tempVector = new THREE.Vector3();
+
+
+        init();
+        animate();
+        
+        function checkCollision(x, y, z) {
+            const cx = snapCenter(x);
+            const cy = snapCenter(y);
+            const cz = snapCenter(z);
+            return getBlockAtCenter(cx, cy, cz);
+        }
+
+        // --- CORE FUNCTIONS (mostly unchanged) ---
+
+        function init() {
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.shadowMap.enabled = true;
+            document.body.appendChild(renderer.domElement);
+
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x90c0e0);
+            
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, GROUND_Y + PLAYER_EYE_HEIGHT, 20); 
+            
+            raycaster = new THREE.Raycaster();
+            raycaster.far = maxRaycastDistance;
+
+            // INITIAL GROUND GRID 
+            const halfSize = planeSize / 2;
+            const groundMaterial = materials[1].material;
+            
+            for (let x = -halfSize + 0.5; x < halfSize; x += 1) {
+                for (let z = -halfSize + 0.5; z < halfSize; z += 1) {
+                    const block = new THREE.Mesh(cubeGeometry, groundMaterial);
+                    block.position.set(x, GROUND_Y, z);
+                    scene.add(block);
+                    objects.push(block);
+                    registerBlock(block);
+                }
+            }
+            
+            scene.add(rollOverMesh);
+            scene.add(highlightMesh);
+            highlightMesh.visible = false;
+
+            const ambientLight = new THREE.AmbientLight(0x606060);
+            scene.add(ambientLight);
+            
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 1.0);
+            directionalLight.position.set(10, 50, 20);
+            scene.add(directionalLight);
+            
+            controls = new THREE.PointerLockControls(camera, document.body);
+            scene.add(controls.getObject());
+
+            document.addEventListener('mousedown', onDocumentMouseDown);
+            window.addEventListener('resize', onWindowResize);
+            document.addEventListener('keydown', onKeyDown);
+            document.addEventListener('keyup', onKeyUp);
+            
+            document.body.addEventListener('click', () => {
+                if (!controls.isLocked && !isPaused) {
+                    controls.lock();
+                }
+            }, false);
+            
+            document.getElementById('resume-button').addEventListener('click', togglePause);
+            
+            const settingsButton = document.getElementById('settings-button');
+            const settingsPanel = document.getElementById('settings-panel');
+            settingsButton.addEventListener('click', () => {
+                const isHidden = settingsPanel.style.display === 'none';
+                settingsPanel.style.display = isHidden ? 'block' : 'none';
+                settingsButton.textContent = isHidden ? 'CLOSE SETTINGS' : 'SETTINGS';
+            });
+            
+            const sensSlider = document.getElementById('sensitivity-slider');
+            const sensValueSpan = document.getElementById('sensitivity-value');
+            sensSlider.addEventListener('input', () => {
+                sensitivity = parseFloat(sensSlider.value);
+                sensValueSpan.textContent = sensitivity.toFixed(2);
+            });
+
+            const distSlider = document.getElementById('distance-slider');
+            const distValueSpan = document.getElementById('distance-value');
+            distSlider.addEventListener('input', () => {
+                maxRaycastDistance = parseFloat(distSlider.value);
+                distValueSpan.textContent = maxRaycastDistance.toFixed(1);
+                raycaster.far = maxRaycastDistance;
+            });
+
+            controls.addEventListener('lock', () => {
+                isPaused = false;
+                document.getElementById('pause-menu').style.display = 'none';
+                document.getElementById('crosshair').style.display = 'block';
+                document.getElementById('block-indicator').style.display = 'block';
+                canJump = true; 
+            });
+        }
+        
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function togglePause() {
+            if (controls.isLocked) {
+                controls.unlock();
+                isPaused = true;
+                document.getElementById('pause-menu').style.display = 'block';
+                document.getElementById('crosshair').style.display = 'none';
+                document.getElementById('block-indicator').style.display = 'none';
+                document.getElementById('settings-panel').style.display = 'none';
+                document.getElementById('settings-button').textContent = 'SETTINGS';
+            } else if (isPaused) {
+                controls.lock();
+            }
+        }
+        
+        function onDocumentMouseDown(event) {
+            if (isPaused || !controls.isLocked) return;
+
+            raycaster.setFromCamera(pointer, camera);
+            const intersects = raycaster.intersectObjects(objects, false);
+
+            if (!intersects.length) return;
+
+            const intersect = intersects[0];
+
+            // PLACE BLOCK
+            if (event.button === 0 && !event.shiftKey) {
+                const hitPos = intersect.object.position.clone();
+                const newPos = hitPos.add(intersect.face.normal);
+
+                snapVec3ToCenters(newPos);
+
+                // Prevent duplicate blocks
+                if (getBlockAtCenter(newPos.x, newPos.y, newPos.z)) return;
+
+                const voxel = new THREE.Mesh(
+                    cubeGeometry,
+                    materials[currentMaterialIndex].material
+                );
+                voxel.position.copy(newPos);
+
+                scene.add(voxel);
+                objects.push(voxel);
+                registerBlock(voxel);
+            }
+
+            // REMOVE BLOCK
+            if (event.button === 0 && event.shiftKey) {
+                if (intersect.object.position.y === GROUND_Y) return;
+
+                scene.remove(intersect.object);
+                unregisterBlock(intersect.object);
+                objects.splice(objects.indexOf(intersect.object), 1);
+            }
+        }
+        
+        function onKeyDown(event) {
+            
+            if (controls.isLocked && event.code.startsWith('Digit')) {
+                const index = parseInt(event.key);
+                if (materials[index]) {
+                    currentMaterialIndex = index;
+                    document.getElementById('block-indicator').textContent = `Block Type: ${materials[index].name} (${index})`;
+                }
+            }
+
+            if (isPaused) return;
+            
+            switch (event.code) {
+                case 'KeyW': moveForward = true; break;
+                case 'KeyS': moveBackward = true; break;
+                case 'KeyA': moveLeft = true; break;
+                case 'KeyD': moveRight = true; break;
+                
+                case 'KeyP': togglePause(); break;
+                
+                case 'Space': 
+                    if (canJump === true) {
+                        velocity.y = JUMP_VELOCITY;
+                        canJump = false;
+                    }
+                    break;
+            }
+        }
+
+        function onKeyUp(event) {
+            switch (event.code) {
+                case 'KeyW': moveForward = false; break;
+                case 'KeyS': moveBackward = false; break;
+                case 'KeyA': moveLeft = false; break;
+                case 'KeyD': moveRight = false; break;
+            }
+        }
+
+        // --- HORIZONTAL COLLISION CHECK (Returns colliding object or null) ---
+        function checkHorizontalCollisionObject(nextX, nextZ, currentY, halfWidth, halfHeight) {
+            const numBlocksHigh = Math.ceil(PLAYER_HEIGHT); 
+            const epsilon = 0.001; 
+
+            const cornerOffsets = [
+                [halfWidth - epsilon, halfWidth - epsilon],  // +X, +Z 
+                [-halfWidth + epsilon, halfWidth - epsilon], // -X, +Z 
+                [halfWidth - epsilon, -halfWidth + epsilon], // +X, -Z 
+                [-halfWidth + epsilon, -halfWidth + epsilon] // -X, -Z 
+            ];
+
+            for (let i = 0; i < numBlocksHigh; i++) {
+                const checkY = currentY - halfHeight + 0.5 + i; 
+
+                for (const offset of cornerOffsets) {
+                    const hitObject = checkCollision(nextX + offset[0], checkY, nextZ + offset[1]);
+                    if (hitObject) {
+                        return hitObject;
+                    }
+                }
+            }
+            return null;
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            const delta = clock.getDelta();
+
+            if (controls.isLocked) {
+
+                // -----------------------------
+                // PHYSICS
+                // -----------------------------
+                
+                // 1. Apply damping/friction
+                velocity.x -= velocity.x * 10.0 * delta;
+                velocity.z -= velocity.z * 10.0 * delta;
+                velocity.y -= GRAVITY * delta;
+
+                const player = controls.getObject();
+                const speed = movementSpeed * sensitivity;
+
+                // 2. Get the player's current forward and right vectors (maintaining only XZ plane movement)
+                
+                // Get the player's world direction (forward vector)
+                player.getWorldDirection(forwardVector); 
+                forwardVector.y = 0; // Lock to XZ plane
+                forwardVector.normalize();
+
+                // Calculate the right vector by rotating the forward vector 90 degrees around Y axis
+                rightVector.set(-forwardVector.z, 0, forwardVector.x);
+
+                // 3. Apply acceleration forces based on input (Relative to Camera)
+
+                if (moveForward) {
+                    // Push velocity in the forward direction
+                    velocity.x -= forwardVector.x * speed * delta;
+                    velocity.z -= forwardVector.z * speed * delta;
+                }
+                if (moveBackward) {
+                    // Push velocity in the opposite (backward) direction
+                    velocity.x += forwardVector.x * speed * delta;
+                    velocity.z += forwardVector.z * speed * delta;
+                }
+                
+                if (moveRight) {
+                    // Push velocity in the right strafe direction
+                    velocity.x -= rightVector.x * speed * delta;
+                    velocity.z -= rightVector.z * speed * delta;
+                }
+                if (moveLeft) {
+                    // Push velocity in the left strafe direction
+                    velocity.x += rightVector.x * speed * delta;
+                    velocity.z += rightVector.z * speed * delta;
+                }
+
+                // 4. Calculate proposed World Position changes
+                const pos = player.position;
+
+                // dx/dz are now the total world movement components accumulated from inputs and damping
+                const dx = -velocity.x * delta;
+                const dz = -velocity.z * delta; 
+                
+                const halfW = PLAYER_HALF_WIDTH;
+                const halfH = PLAYER_HEIGHT / 2;
+                const eps = 0.001;
+
+                // --- ORIGINAL COLLISION CHECK FUNCTION (Unchanged) ---
+                function collidesAt(x, y, z) {
+                    const minX = Math.floor(x - halfW);
+                    const maxX = Math.floor(x + halfW);
+                    const minY = Math.floor(y - halfH);
+                    const maxY = Math.floor(y + halfH);
+                    const minZ = Math.floor(z - halfW);
+                    const maxZ = Math.floor(z + halfW);
+
+                    for (let ix = minX; ix <= maxX; ix++) {
+                        for (let iy = minY; iy <= maxY; iy++) {
+                            for (let iz = minZ; iz <= maxZ; iz++) {
+                                if (getBlockAtCenter(ix + 0.5, iy + 0.5, iz + 0.5)) {
+                                    return { ix, iy, iz };
+                                }
+                            }
+                        }
+                    }
+                    return null;
+                }
+
+                // -----------------------------
+                // X AXIS COLLISION (Original Logic)
+                // -----------------------------
+                if (dx !== 0) {
+                    const nx = pos.x + dx;
+                    const hit = collidesAt(nx, pos.y, pos.z);
+
+                    if (!hit) {
+                        pos.x = nx;
+                    } else {
+                        velocity.x = 0;
+                        pos.x = dx > 0
+                            ? hit.ix - halfW - eps
+                            : hit.ix + 1 + halfW + eps;
+                    }
+                }
+
+                // -----------------------------
+                // Z AXIS COLLISION (Original Logic)
+                // -----------------------------
+                if (dz !== 0) {
+                    const nz = pos.z + dz;
+                    const hit = collidesAt(pos.x, pos.y, nz);
+
+                    if (!hit) {
+                        pos.z = nz;
+                    } else {
+                        velocity.z = 0;
+                        pos.z = dz > 0
+                            ? hit.iz - halfW - eps
+                            : hit.iz + 1 + halfW + eps;
+                    }
+                }
+
+                // -----------------------------
+                // Y AXIS COLLISION (Original Logic)
+                // -----------------------------
+                const ny = pos.y + velocity.y * delta;
+                const hitY = collidesAt(pos.x, ny, pos.z);
+
+                if (!hitY) {
+                    pos.y = ny;
+                    canJump = false;
+                } else {
+                    if (velocity.y < 0) {
+                        velocity.y = 0;
+                        pos.y = hitY.iy + 1 + halfH + eps;
+                        canJump = true;
+                    } else {
+                        velocity.y = 0;
+                        pos.y = hitY.iy - halfH - eps;
+                    }
+                }
+            }
+
+            // -----------------------------
+            // RAYCAST VISUALS
+            // -----------------------------
+            raycaster.setFromCamera(pointer, camera);
+            const intersects = raycaster.intersectObjects(objects, false);
+
+            if (intersects.length > 0) {
+                const intersect = intersects[0];
+
+                const normal = intersect.face.normal;
+                const hitPos = intersect.object.position.clone();
+                const newPos = hitPos.add(normal);
+
+                rollOverMesh.position.copy(newPos);
+                rollOverMesh.visible = !isPaused;
+
+                highlightMesh.position.copy(intersect.object.position);
+                highlightMesh.visible = !isPaused;
+            } else {
+                rollOverMesh.visible = false;
+                highlightMesh.visible = false;
+            }
+
+            renderer.render(scene, camera);
+        }
+    </script>
+</body>
+</html>

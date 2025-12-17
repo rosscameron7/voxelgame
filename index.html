@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Voxel Builder (Relative Movement Fixed)</title>
+    <title>Voxel Builder (Minecraft Style Physics)</title>
     <style>
         body { margin: 0; overflow: hidden; background-color: #222; user-select: none; }
         canvas { display: block; }
@@ -128,12 +128,15 @@
 
     <script>
         // --- CONSTANTS ---
-        const PLAYER_HEIGHT = 4.0; 
-        const PLAYER_EYE_HEIGHT = 3.8; 
-        const PLAYER_HALF_WIDTH = 0.4; 
+        // FIX 1: Adjust constants for Minecraft-style player (1 block wide, 2 blocks tall)
+        const PLAYER_HEIGHT = 1.8;        // Full body height
+const PLAYER_EYE_HEIGHT = 1.62;   // Minecraft eye height
+const PLAYER_HALF_WIDTH = 0.3;    // 0.6 blocks wide
+
+        
         const GRAVITY = 30.0; 
         const JUMP_VELOCITY = 9.5; 
-        const GROUND_Y = 0.5; 
+        const GROUND_Y = 0.5; // Center Y of the initial ground layer
         
         // --- SCENE SETUP VARIABLES ---
         let camera, scene, renderer, raycaster;
@@ -215,7 +218,6 @@
         let canJump = false; 
         
         let velocity = new THREE.Vector3();
-        // Removed `direction` since we now use camera's world direction
         const clock = new THREE.Clock();
         
         let isPaused = false;
@@ -227,20 +229,12 @@
         // --- VECTORS FOR RELATIVE MOVEMENT ---
         const forwardVector = new THREE.Vector3();
         const rightVector = new THREE.Vector3();
-        const tempVector = new THREE.Vector3();
 
 
         init();
         animate();
         
-        function checkCollision(x, y, z) {
-            const cx = snapCenter(x);
-            const cy = snapCenter(y);
-            const cz = snapCenter(z);
-            return getBlockAtCenter(cx, cy, cz);
-        }
-
-        // --- CORE FUNCTIONS (mostly unchanged) ---
+        // --- CORE FUNCTIONS ---
 
         function init() {
             renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -253,7 +247,11 @@
             scene.background = new THREE.Color(0x90c0e0);
             
             camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-            camera.position.set(0, GROUND_Y + PLAYER_EYE_HEIGHT, 20); 
+            
+            // Set initial camera Y based on ground surface (1.0) + eye offset (1.7) = 2.7
+            const feetY = GROUND_Y + 0.5;
+camera.position.set(0, feetY + PLAYER_EYE_HEIGHT, 20);
+
             
             raycaster = new THREE.Raycaster();
             raycaster.far = maxRaycastDistance;
@@ -327,8 +325,9 @@
                 document.getElementById('pause-menu').style.display = 'none';
                 document.getElementById('crosshair').style.display = 'block';
                 document.getElementById('block-indicator').style.display = 'block';
-                canJump = true; 
             });
+            
+            canJump = true; 
         }
         
         function onWindowResize() {
@@ -352,45 +351,86 @@
         }
         
         function onDocumentMouseDown(event) {
-            if (isPaused || !controls.isLocked) return;
+  if (isPaused || !controls.isLocked) return;
 
-            raycaster.setFromCamera(pointer, camera);
-            const intersects = raycaster.intersectObjects(objects, false);
+  raycaster.setFromCamera(pointer, camera);
+  const intersects = raycaster.intersectObjects(objects, false);
 
-            if (!intersects.length) return;
+  if (!intersects.length) return;
 
-            const intersect = intersects[0];
+  const intersect = intersects[0];
 
-            // PLACE BLOCK
-            if (event.button === 0 && !event.shiftKey) {
-                const hitPos = intersect.object.position.clone();
-                const newPos = hitPos.add(intersect.face.normal);
+  // -----------------------------
+  // PLACE BLOCK
+  // -----------------------------
+  if (event.button === 0 && !event.shiftKey) {
+    const hitPos = intersect.object.position.clone();
+    const newPos = hitPos.add(intersect.face.normal);
+    snapVec3ToCenters(newPos);
 
-                snapVec3ToCenters(newPos);
+    // --- PLAYER FEET-BASED BOUNDS ---
+    const playerPos = controls.getObject().position;
+    const feetY = playerPos.y - PLAYER_EYE_HEIGHT;
 
-                // Prevent duplicate blocks
-                if (getBlockAtCenter(newPos.x, newPos.y, newPos.z)) return;
+    const pMin = {
+      x: playerPos.x - PLAYER_HALF_WIDTH,
+      y: feetY,
+      z: playerPos.z - PLAYER_HALF_WIDTH
+    };
 
-                const voxel = new THREE.Mesh(
-                    cubeGeometry,
-                    materials[currentMaterialIndex].material
-                );
-                voxel.position.copy(newPos);
+    const pMax = {
+      x: playerPos.x + PLAYER_HALF_WIDTH,
+      y: feetY + PLAYER_HEIGHT,
+      z: playerPos.z + PLAYER_HALF_WIDTH
+    };
 
-                scene.add(voxel);
-                objects.push(voxel);
-                registerBlock(voxel);
-            }
+    // Block AABB
+    const bMin = {
+      x: newPos.x - 0.5,
+      y: newPos.y - 0.5,
+      z: newPos.z - 0.5
+    };
 
-            // REMOVE BLOCK
-            if (event.button === 0 && event.shiftKey) {
-                if (intersect.object.position.y === GROUND_Y) return;
+    const bMax = {
+      x: newPos.x + 0.5,
+      y: newPos.y + 0.5,
+      z: newPos.z + 0.5
+    };
 
-                scene.remove(intersect.object);
-                unregisterBlock(intersect.object);
-                objects.splice(objects.indexOf(intersect.object), 1);
-            }
-        }
+    // Prevent placing inside player
+    const intersectsPlayer =
+      bMax.x > pMin.x && bMin.x < pMax.x &&
+      bMax.y > pMin.y && bMin.y < pMax.y &&
+      bMax.z > pMin.z && bMin.z < pMax.z;
+
+    if (intersectsPlayer) return;
+
+    // Prevent duplicate blocks
+    if (getBlockAtCenter(newPos.x, newPos.y, newPos.z)) return;
+
+    const voxel = new THREE.Mesh(
+      cubeGeometry,
+      materials[currentMaterialIndex].material
+    );
+
+    voxel.position.copy(newPos);
+    scene.add(voxel);
+    objects.push(voxel);
+    registerBlock(voxel);
+  }
+
+  // -----------------------------
+  // REMOVE BLOCK
+  // -----------------------------
+  if (event.button === 0 && event.shiftKey) {
+    if (intersect.object.position.y === GROUND_Y) return;
+
+    scene.remove(intersect.object);
+    unregisterBlock(intersect.object);
+    objects.splice(objects.indexOf(intersect.object), 1);
+  }
+}
+
         
         function onKeyDown(event) {
             
@@ -430,196 +470,173 @@
             }
         }
 
-        // --- HORIZONTAL COLLISION CHECK (Returns colliding object or null) ---
-        function checkHorizontalCollisionObject(nextX, nextZ, currentY, halfWidth, halfHeight) {
-            const numBlocksHigh = Math.ceil(PLAYER_HEIGHT); 
-            const epsilon = 0.001; 
+        // --- COLLISION CHECK FUNCTION (Uses bounding box centered on camera Y) ---
+        function collidesAt(feetX, feetY, feetZ) {
+  const minX = Math.floor(feetX - PLAYER_HALF_WIDTH);
+  const maxX = Math.floor(feetX + PLAYER_HALF_WIDTH);
 
-            const cornerOffsets = [
-                [halfWidth - epsilon, halfWidth - epsilon],  // +X, +Z 
-                [-halfWidth + epsilon, halfWidth - epsilon], // -X, +Z 
-                [halfWidth - epsilon, -halfWidth + epsilon], // +X, -Z 
-                [-halfWidth + epsilon, -halfWidth + epsilon] // -X, -Z 
-            ];
+  const minY = Math.floor(feetY);
+  const maxY = Math.floor(feetY + PLAYER_HEIGHT);
 
-            for (let i = 0; i < numBlocksHigh; i++) {
-                const checkY = currentY - halfHeight + 0.5 + i; 
+  const minZ = Math.floor(feetZ - PLAYER_HALF_WIDTH);
+  const maxZ = Math.floor(feetZ + PLAYER_HALF_WIDTH);
 
-                for (const offset of cornerOffsets) {
-                    const hitObject = checkCollision(nextX + offset[0], checkY, nextZ + offset[1]);
-                    if (hitObject) {
-                        return hitObject;
-                    }
-                }
-            }
-            return null;
+  for (let x = minX; x <= maxX; x++) {
+    for (let y = minY; y <= maxY; y++) {
+      for (let z = minZ; z <= maxZ; z++) {
+        if (getBlockAtCenter(x + 0.5, y + 0.5, z + 0.5)) {
+          return { x, y, z };
         }
+      }
+    }
+  }
+  return null;
+}
+
 
         function animate() {
-            requestAnimationFrame(animate);
+  requestAnimationFrame(animate);
 
-            const delta = clock.getDelta();
+  const delta = clock.getDelta();
+  const eps = 0.001;
 
-            if (controls.isLocked) {
+  if (controls.isLocked) {
 
-                // -----------------------------
-                // PHYSICS
-                // -----------------------------
-                
-                // 1. Apply damping/friction
-                velocity.x -= velocity.x * 10.0 * delta;
-                velocity.z -= velocity.z * 10.0 * delta;
-                velocity.y -= GRAVITY * delta;
+    // -----------------------------
+    // PHYSICS INTEGRATION
+    // -----------------------------
+    velocity.x -= velocity.x * 10.0 * delta;
+    velocity.z -= velocity.z * 10.0 * delta;
+    velocity.y -= GRAVITY * delta;
 
-                const player = controls.getObject();
-                const speed = movementSpeed * sensitivity;
+    const speed = movementSpeed * sensitivity;
+    const player = controls.getObject();
+    const pos = player.position;
 
-                // 2. Get the player's current forward and right vectors (maintaining only XZ plane movement)
-                
-                // Get the player's world direction (forward vector)
-                player.getWorldDirection(forwardVector); 
-                forwardVector.y = 0; // Lock to XZ plane
-                forwardVector.normalize();
+    // -----------------------------
+    // DIRECTION VECTORS (WORLD)
+    // -----------------------------
+    player.getWorldDirection(forwardVector);
+    forwardVector.y = 0;
+    forwardVector.normalize();
 
-                // Calculate the right vector by rotating the forward vector 90 degrees around Y axis
-                rightVector.set(-forwardVector.z, 0, forwardVector.x);
+    rightVector.set(
+      -forwardVector.z,
+      0,
+      forwardVector.x
+    );
 
-                // 3. Apply acceleration forces based on input (Relative to Camera)
+    if (moveForward) {
+      velocity.x -= forwardVector.x * speed * delta;
+      velocity.z -= forwardVector.z * speed * delta;
+    }
+    if (moveBackward) {
+      velocity.x += forwardVector.x * speed * delta;
+      velocity.z += forwardVector.z * speed * delta;
+    }
+    if (moveRight) {
+      velocity.x -= rightVector.x * speed * delta;
+      velocity.z -= rightVector.z * speed * delta;
+    }
+    if (moveLeft) {
+      velocity.x += rightVector.x * speed * delta;
+      velocity.z += rightVector.z * speed * delta;
+    }
 
-                if (moveForward) {
-                    // Push velocity in the forward direction
-                    velocity.x -= forwardVector.x * speed * delta;
-                    velocity.z -= forwardVector.z * speed * delta;
-                }
-                if (moveBackward) {
-                    // Push velocity in the opposite (backward) direction
-                    velocity.x += forwardVector.x * speed * delta;
-                    velocity.z += forwardVector.z * speed * delta;
-                }
-                
-                if (moveRight) {
-                    // Push velocity in the right strafe direction
-                    velocity.x -= rightVector.x * speed * delta;
-                    velocity.z -= rightVector.z * speed * delta;
-                }
-                if (moveLeft) {
-                    // Push velocity in the left strafe direction
-                    velocity.x += rightVector.x * speed * delta;
-                    velocity.z += rightVector.z * speed * delta;
-                }
+    // -----------------------------
+    // FEET-BASED POSITION
+    // -----------------------------
+    const feetY = pos.y - PLAYER_EYE_HEIGHT;
 
-                // 4. Calculate proposed World Position changes
-                const pos = player.position;
+    const dx = -velocity.x * delta;
+    const dz = -velocity.z * delta;
+    const nextFeetY = feetY + velocity.y * delta;
 
-                // dx/dz are now the total world movement components accumulated from inputs and damping
-                const dx = -velocity.x * delta;
-                const dz = -velocity.z * delta; 
-                
-                const halfW = PLAYER_HALF_WIDTH;
-                const halfH = PLAYER_HEIGHT / 2;
-                const eps = 0.001;
+    // -----------------------------
+    // X AXIS COLLISION
+    // -----------------------------
+    if (dx !== 0) {
+      const nx = pos.x + dx;
+      const hitX = collidesAt(nx, feetY, pos.z);
 
-                // --- ORIGINAL COLLISION CHECK FUNCTION (Unchanged) ---
-                function collidesAt(x, y, z) {
-                    const minX = Math.floor(x - halfW);
-                    const maxX = Math.floor(x + halfW);
-                    const minY = Math.floor(y - halfH);
-                    const maxY = Math.floor(y + halfH);
-                    const minZ = Math.floor(z - halfW);
-                    const maxZ = Math.floor(z + halfW);
+      if (!hitX) {
+        pos.x = nx;
+      } else {
+        velocity.x = 0;
+        pos.x = dx > 0
+          ? hitX.x - PLAYER_HALF_WIDTH - eps
+          : hitX.x + 1 + PLAYER_HALF_WIDTH + eps;
+      }
+    }
 
-                    for (let ix = minX; ix <= maxX; ix++) {
-                        for (let iy = minY; iy <= maxY; iy++) {
-                            for (let iz = minZ; iz <= maxZ; iz++) {
-                                if (getBlockAtCenter(ix + 0.5, iy + 0.5, iz + 0.5)) {
-                                    return { ix, iy, iz };
-                                }
-                            }
-                        }
-                    }
-                    return null;
-                }
+    // -----------------------------
+    // Z AXIS COLLISION
+    // -----------------------------
+    if (dz !== 0) {
+      const nz = pos.z + dz;
+      const hitZ = collidesAt(pos.x, feetY, nz);
 
-                // -----------------------------
-                // X AXIS COLLISION (Original Logic)
-                // -----------------------------
-                if (dx !== 0) {
-                    const nx = pos.x + dx;
-                    const hit = collidesAt(nx, pos.y, pos.z);
+      if (!hitZ) {
+        pos.z = nz;
+      } else {
+        velocity.z = 0;
+        pos.z = dz > 0
+          ? hitZ.z - PLAYER_HALF_WIDTH - eps
+          : hitZ.z + 1 + PLAYER_HALF_WIDTH + eps;
+      }
+    }
 
-                    if (!hit) {
-                        pos.x = nx;
-                    } else {
-                        velocity.x = 0;
-                        pos.x = dx > 0
-                            ? hit.ix - halfW - eps
-                            : hit.ix + 1 + halfW + eps;
-                    }
-                }
+    // -----------------------------
+    // Y AXIS COLLISION (NO BOUNCE)
+    // -----------------------------
+    const hitY = collidesAt(pos.x, nextFeetY, pos.z);
 
-                // -----------------------------
-                // Z AXIS COLLISION (Original Logic)
-                // -----------------------------
-                if (dz !== 0) {
-                    const nz = pos.z + dz;
-                    const hit = collidesAt(pos.x, pos.y, nz);
+    if (!hitY) {
+      pos.y = nextFeetY + PLAYER_EYE_HEIGHT;
+      canJump = false;
+    } else {
+      if (velocity.y < 0) {
+        // Landing on ground
+        velocity.y = 0;
+        pos.y = hitY.y + 1 + PLAYER_EYE_HEIGHT + eps;
+        canJump = true;
+      } else {
+        // Hitting head
+        velocity.y = 0;
+        pos.y = hitY.y - (PLAYER_HEIGHT - PLAYER_EYE_HEIGHT) - eps;
+      }
+    }
+  }
 
-                    if (!hit) {
-                        pos.z = nz;
-                    } else {
-                        velocity.z = 0;
-                        pos.z = dz > 0
-                            ? hit.iz - halfW - eps
-                            : hit.iz + 1 + halfW + eps;
-                    }
-                }
+  // -----------------------------
+  // RAYCAST VISUALS
+  // -----------------------------
+  raycaster.setFromCamera(pointer, camera);
+  raycaster.far = maxRaycastDistance;
 
-                // -----------------------------
-                // Y AXIS COLLISION (Original Logic)
-                // -----------------------------
-                const ny = pos.y + velocity.y * delta;
-                const hitY = collidesAt(pos.x, ny, pos.z);
+  const intersects = raycaster.intersectObjects(objects, false);
 
-                if (!hitY) {
-                    pos.y = ny;
-                    canJump = false;
-                } else {
-                    if (velocity.y < 0) {
-                        velocity.y = 0;
-                        pos.y = hitY.iy + 1 + halfH + eps;
-                        canJump = true;
-                    } else {
-                        velocity.y = 0;
-                        pos.y = hitY.iy - halfH - eps;
-                    }
-                }
-            }
+  if (intersects.length > 0) {
+    const intersect = intersects[0];
 
-            // -----------------------------
-            // RAYCAST VISUALS
-            // -----------------------------
-            raycaster.setFromCamera(pointer, camera);
-            const intersects = raycaster.intersectObjects(objects, false);
+    const normal = intersect.face.normal;
+    const hitPos = intersect.object.position.clone();
+    const newPos = hitPos.add(normal);
+    snapVec3ToCenters(newPos);
 
-            if (intersects.length > 0) {
-                const intersect = intersects[0];
+    rollOverMesh.position.copy(newPos);
+    rollOverMesh.visible = !isPaused;
 
-                const normal = intersect.face.normal;
-                const hitPos = intersect.object.position.clone();
-                const newPos = hitPos.add(normal);
+    highlightMesh.position.copy(intersect.object.position);
+    highlightMesh.visible = !isPaused;
+  } else {
+    rollOverMesh.visible = false;
+    highlightMesh.visible = false;
+  }
 
-                rollOverMesh.position.copy(newPos);
-                rollOverMesh.visible = !isPaused;
+  renderer.render(scene, camera);
+}
 
-                highlightMesh.position.copy(intersect.object.position);
-                highlightMesh.visible = !isPaused;
-            } else {
-                rollOverMesh.visible = false;
-                highlightMesh.visible = false;
-            }
-
-            renderer.render(scene, camera);
-        }
     </script>
 </body>
 </html>
